@@ -20,8 +20,13 @@ def _env():
         from dotenv import load_dotenv
 
         load_dotenv(ROOT / ".env")
-    except ImportError:
-        pass
+    except ImportError:  # minimal fallback: KEY=VALUE lines
+        envf = ROOT / ".env"
+        if envf.exists():
+            for line in envf.read_text().splitlines():
+                k, sep, v = line.strip().partition("=")
+                if sep and not k.startswith("#") and v:
+                    os.environ.setdefault(k.strip(), v.strip().strip("'\""))
     base = os.environ.get("VE_API_BASE", "https://api.virtualembryo.ai").rstrip("/")
     return base, os.environ.get("VE_CHALLENGE_API_KEY", "")
 
