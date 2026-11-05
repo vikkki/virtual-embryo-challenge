@@ -15,8 +15,9 @@ WEIGHTS = {
 }
 
 
-def component(value: float, floor: float, ceiling: float) -> float:
-    return 50 + 50 * (value - floor) / (ceiling - floor)
+def component(value: float, floor: float, ceiling: float, clip: bool = True) -> float:
+    v = 50 + 50 * (value - floor) / (ceiling - floor)
+    return min(max(v, 0.0), 100.0) if clip else v   # clipping to [0, 100] is our assumption
 
 
 def approx_score(metrics: dict, key: str) -> dict:

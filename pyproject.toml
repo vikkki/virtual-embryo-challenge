@@ -17,6 +17,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "jupyterlab"]
+# T3 prototype: torch for vec.t3model, omnipath to fetch CollecTRI into data/priors/
+model = ["torch>=2.2", "omnipath>=1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]
