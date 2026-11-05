@@ -12,6 +12,7 @@ dependencies = [
   "veckit==0.1.2",
   "python-dotenv",
   "requests",
+  "scikit-learn",
 ]
 
 [project.optional-dependencies]
