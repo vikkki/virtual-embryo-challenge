@@ -15,7 +15,7 @@ Purpose: model how the WT background moves with stage, so a KO effect learned at
 
 | Source | What | Stages | Access | Status |
 |---|---|---|---|---|
-| Imaz-Rosshandler et al. 2024, *Development* 151 (doi 10.1242/dev.201867) | scRNA atlas, ~300k cells, 6 h sampling | E8.5–E9.5 (+ E6.5–E8.5 → 430k cells) | ArrayExpress (grafts: E-MTAB-13645); MouseGastrulationData | ✅ for T3. If a model is shared with T2 heart, drop cells strictly between E8.25–E8.75 |
+| Imaz-Rosshandler et al. 2024, *Development* 151 (doi 10.1242/dev.201867) | scRNA atlas, ~300k cells, 6 h sampling | E8.5–E9.5 (+ E6.5–E8.5 → 430k cells) | raw only: E-MTAB-11763 (needs alignment); browser: marionilab.github.io/ExtendedMouseAtlas | ✅ (deferred: no processed matrix) for T3. If a model is shared with T2 heart, drop cells strictly between E8.25–E8.75 |
 | Pijuan-Sala et al. 2019, *Nature* 566 | scRNA gastrulation atlas, 116k cells | E6.5–E8.5 | MouseGastrulationData (E-MTAB-6967) | ✅ (T2 embryo: drop strictly-between E7.25–E8.0) |
 | Qiu et al. 2024, *Nature* (JAX time-lapse) | sci-RNA-seq3, 12.4M nuclei | E8 → P0 | GEO (see paper) | ✅ for T3 at ≤E9.5. ❌ E9.5–E13.5 for any model shared with T1 |
 | Lohoff et al. 2022, *Nat Biotech* | seqFISH, 351 genes, 3 embryos | E8.5 | Marioni lab portal | ✅ spatial reference |
@@ -33,7 +33,7 @@ So these teach the *shape* of a response, not its content.
 | de Soysa et al. 2019 | *Hand2*-null cardiac progenitors | E7.75–E9.25 | GSE126128 | ✅ cardiac TF KO, same tissue and stage |
 | Li et al. 2016, *Dev Cell* (ATLAS-seq) | *Nkx2-5*⁻/⁻ cardiomyocytes | E9.5 | GSE76118 (Fluidigm, small) | ✅ |
 | Grosswendt et al. 2020, *Nature* | 10 epigenetic regulator zygotic KOs (PRC1/2, Kdm2b, L3mbtl2, Kmt2a, …) | E8.5 (WT E6.5–E8.5) | GSE137337 | ✅ includes delay phenotypes (e.g. L3mbtl2, PRC2) |
-| Tet-TKO chimeras (PMC9432429) | *Tet1/2/3* TKO, 30 KO and 18 control embryos | E7.5–E8.5 | see paper | ✅ |
+| Tet-TKO chimeras (PMC9432429; Argelaguet repo `10x_gastrulation_TetChimera`) | *Tet1/2/3* TKO, KO tdTom+ vs WT host | E7.5–E8.5 | GEO (see repo) | ⚠️ papers report marked Wnt-signalling perturbation, so it could be ruled a phenocopy |
 | Guibentif et al. 2021, *Dev Cell* | *T* (Brachyury)⁻/⁻ chimeras | E8.5 | MouseGastrulationData | ⚠️ T is a direct Wnt/β-catenin target, and the Wnt3a/T posterior-truncation phenotypes overlap, so this could be ruled a phenocopy |
 | Huang et al. 2023, *Nature* 623 | 22 mutants, whole embryo | E13.5 | see paper | ⚠️ stage is far from E8.75; ❌ in any model shared with T1 (E13.5 inclusive is excluded) |
 
@@ -59,3 +59,15 @@ So these teach the *shape* of a response, not its content.
 1. Is *T*/Brachyury-null data considered a phenocopy of the β-catenin KO?
 2. Are curated Wnt target gene lists / TCF-LEF ChIP-seq (WT tissue, no KO) permitted for T3?
 3. Which β-catenin allele and Cre driver is the test KO? (It decides what counts as "comparable".)
+
+## Downloaded (scripts/download_external.sh → data/external/, git-ignored)
+
+| Folder | Source | Files |
+|---|---|---|
+| `tal1_chimera_pijuansala2019/` | ArrayExpress E-MTAB-7325 | `chimera_tal1_data.tar.gz`, sdrf |
+| `atlas_pijuansala2019/` | ArrayExpress E-MTAB-6967 | `atlas_data.tar.gz`, sdrf |
+| `hand2_desoysa2019/` | GEO GSE126128 | WT all timepoints; WT+KO E7.75/E8.25; WT+KO E9.25 (dense CSV); series matrix |
+| `nkx25_li2016/` | GEO GSE76118 | `RAW.tar` (HTSeq counts per cell); series matrix (genotype per cell) |
+| `ko_grosswendt2020/` | GEO GSE137337 | E8.5 scRNA for 11 KOs (bigwig methylation RAW.tar skipped); series matrices |
+
+Checksums: `data/external/SHA256SUMS` (made after download).

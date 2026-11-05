@@ -10,6 +10,8 @@ from .panels import board
 
 WEIGHTS = {
     "T1": {"de_score": 25, "de_direction": 25, "mmd_u": 30, "variogram": 20},
+    # T3: response genes 30, direction 25, magnitude (severity_slope) 25, cell-state distribution 20
+    "T3": {"de_score": 30, "de_direction": 25, "severity_slope": 25, "mmd_u": 20},
 }
 
 
