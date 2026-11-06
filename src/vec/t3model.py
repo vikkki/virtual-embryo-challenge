@@ -14,6 +14,7 @@ composition shifts are largely dissection-specific and do not replicate across t
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -133,15 +134,27 @@ def _norm_stats(ctxs):
 
 
 def fit(train: list[tuple[Context, np.ndarray, np.ndarray]], seeds=(0, 1, 2), epochs: int = 300, lr: float = 3e-3):
-    """train: list of (context, label delta (S,G), ok mask (S,)). Returns an ensemble predictor."""
+    """train: list of (context, label delta (S,G), ok mask (S,)). Returns an ensemble predictor.
+
+    Trains on CUDA. Training is meant to run on the remote GPU box (scripts/remote.sh); on a machine
+    without CUDA it refuses unless VEC_ALLOW_CPU_TRAIN=1 is set.
+    """
+    if torch.cuda.is_available():
+        dev = torch.device("cuda")
+    elif os.environ.get("VEC_ALLOW_CPU_TRAIN") == "1":
+        dev = torch.device("cpu")
+    else:
+        raise RuntimeError("no CUDA here: run training on the remote box (scripts/remote.sh run ...), "
+                           "or set VEC_ALLOW_CPU_TRAIN=1 to train on CPU deliberately")
     xm, xs = _norm_stats([c for c, _, _ in train])
+    T = lambda a, dt=torch.float32: torch.as_tensor(np.asarray(a), dtype=dt, device=dev)
     models = []
     for seed in seeds:
         torch.manual_seed(seed)
-        model = SpikeSlab()
+        model = SpikeSlab().to(dev)
         opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
-        data = [(torch.tensor((c.X - xm) / xs), torch.tensor(c.tsum), torch.tensor(np.nan_to_num(y), dtype=torch.float32),
-                 torch.tensor((c.f * ok)[:, None].repeat(y.shape[1], 1), dtype=torch.float32)) for c, y, ok in train]
+        data = [(T((c.X - xm) / xs), T(c.tsum), T(np.nan_to_num(y)),
+                 T((c.f * ok)[:, None].repeat(y.shape[1], 1))) for c, y, ok in train]
         for ep in range(epochs):
             opt.zero_grad()
             loss = sum(_loss(model, x, ts, y, w) for x, ts, y, w in data) / len(data)
@@ -150,10 +163,10 @@ def fit(train: list[tuple[Context, np.ndarray, np.ndarray]], seeds=(0, 1, 2), ep
         models.append(model.eval())
 
     def predict(c: Context) -> dict[str, np.ndarray]:
-        x = torch.tensor((c.X - xm) / xs)
+        x = T((c.X - xm) / xs)
         with torch.no_grad():
-            outs = [m(x, torch.tensor(c.tsum)) for m in models]
-        pi = torch.stack([o[0] for o in outs]).mean(0).numpy()
-        yhat = torch.stack([(1 - o[0]) * o[1] for o in outs]).mean(0).numpy()
+            outs = [m(x, T(c.tsum)) for m in models]
+        pi = torch.stack([o[0] for o in outs]).mean(0).cpu().numpy()
+        yhat = torch.stack([(1 - o[0]) * o[1] for o in outs]).mean(0).cpu().numpy()
         return {"pi": pi, "yhat": yhat}
     return predict
