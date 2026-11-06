@@ -37,6 +37,7 @@ class Context:
     X: np.ndarray
     tsum: np.ndarray
     f: np.ndarray
+    gmask: np.ndarray        # (G,) 1 = gene measured in this context (external scRNA may miss some)
 
 
 def load_network(path=None) -> pd.DataFrame:
@@ -53,15 +54,20 @@ def regulon(net: pd.DataFrame, tf: str, genes: list[str]) -> np.ndarray:
 
 def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
                   activity: np.ndarray | None = None) -> Context:
-    """`activity` (S,) overrides the target's per-state level; needed when the target is off the panel."""
+    """Target activity per state, in order of preference: `activity` (S,) given explicitly; the target's
+    measured all-gene expression in the WT cells (`wt.target_expr`, external data); its panel transcript;
+    otherwise uniform (unknown)."""
     genes = list(wt.genes)
     states = sorted(set(wt.state))
     st = t3.state_stats(wt, states)
     mu, nz, f = np.nan_to_num(st["mu"]), np.nan_to_num(st["nz"]), st["f"]
     S, G = mu.shape
-    on_panel = target in genes
+    on_panel = target in genes and (wt.present is None or wt.present[genes.index(target)])
+    texpr = wt.target_expr
     if activity is not None:
         a = np.asarray(activity, float)
+    elif texpr is not None:
+        a = np.array([texpr[wt.state == s].mean() for s in states])
     elif on_panel:
         a = mu[:, genes.index(target)]
     else:
@@ -69,11 +75,12 @@ def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
     a = a / (a.max() + 1e-9)
     gbar = (f[:, None] * mu).sum(0)
     ident = mu - gbar
-    if on_panel:
-        j = genes.index(target)
-        Xc = wt.X - wt.X.mean(0)
-        co = (Xc * Xc[:, [j]]).mean(0) / (Xc.std(0) * Xc[:, j].std() + 1e-9)
-        co[j] = 0
+    if on_panel or texpr is not None:
+        t = texpr if texpr is not None else wt.X[:, genes.index(target)]
+        Xc, tc = wt.X - wt.X.mean(0), t - t.mean()
+        co = (Xc * tc[:, None]).mean(0) / (Xc.std(0) * tc.std() + 1e-9)
+        if on_panel:
+            co[genes.index(target)] = 0
     else:
         co = np.zeros(G)
     w = regulon(net, target, genes) if net is not None else np.zeros(G)
@@ -87,7 +94,8 @@ def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
                   col(a) * rep(w), rep(gsd)], -1).astype(np.float32)
     tsum = np.array([(a > 0.2).mean(), a.max(), float(on_panel), float((w != 0).sum()) / 50,
                      float(net is not None and (net.source_genesymbol == target).any())], np.float32)
-    return Context(target, states, X, tsum, f)
+    gmask = np.ones(G, np.float32) if wt.present is None else wt.present.astype(np.float32)
+    return Context(target, states, X, tsum, f, gmask)
 
 
 class FiLMBlock(nn.Module):
@@ -154,7 +162,7 @@ def fit(train: list[tuple[Context, np.ndarray, np.ndarray]], seeds=(0, 1, 2), ep
         model = SpikeSlab().to(dev)
         opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
         data = [(T((c.X - xm) / xs), T(c.tsum), T(np.nan_to_num(y)),
-                 T((c.f * ok)[:, None].repeat(y.shape[1], 1))) for c, y, ok in train]
+                 T((c.f * ok)[:, None] * c.gmask[None, :])) for c, y, ok in train]
         for ep in range(epochs):
             opt.zero_grad()
             loss = sum(_loss(model, x, ts, y, w) for x, ts, y, w in data) / len(data)
@@ -168,5 +176,5 @@ def fit(train: list[tuple[Context, np.ndarray, np.ndarray]], seeds=(0, 1, 2), ep
             outs = [m(x, T(c.tsum)) for m in models]
         pi = torch.stack([o[0] for o in outs]).mean(0).cpu().numpy()
         yhat = torch.stack([(1 - o[0]) * o[1] for o in outs]).mean(0).cpu().numpy()
-        return {"pi": pi, "yhat": yhat}
+        return {"pi": pi, "yhat": yhat * c.gmask[None, :]}
     return predict

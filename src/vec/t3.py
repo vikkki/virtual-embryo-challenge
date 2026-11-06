@@ -46,16 +46,35 @@ class Sample:
     coords: np.ndarray       # cells x 3
     celltype: np.ndarray     # file's own labels (vocabularies differ between files)
     state: np.ndarray | None = None   # labels in the stage-matched WT vocabulary
+    present: np.ndarray | None = None  # genes the dataset measured (external scRNA); None = all
+    target_expr: np.ndarray | None = None  # per-cell log-expression of the KO target over all genes (WT only)
+
+
+def external_index() -> dict:
+    """data/processed/index.json written by vec.external (empty if nothing has been ingested)."""
+    import json
+    p = DATA / "processed/index.json"
+    return json.loads(p.read_text()) if p.exists() else {}
 
 
 def load(name: str, n: int | None = None, seed: int = 0) -> Sample:
-    a = ad.read_h5ad(DATA / SAMPLES[name])
+    """Challenge samples by key (SAMPLES), or processed external files by name (e.g. "hand2_null_E8.25_WT"),
+    which come with their states already assigned."""
+    path = DATA / SAMPLES[name] if name in SAMPLES else DATA / "processed" / f"{name}.h5ad"
+    a = ad.read_h5ad(path)
     if n and a.n_obs > n:
         a = a[np.sort(np.random.default_rng(seed).choice(a.n_obs, n, replace=False))]
     X = a.X.toarray() if sp.issparse(a.X) else np.asarray(a.X)
     ct = np.asarray(a.obs["celltype"]).astype(str) if "celltype" in a.obs else np.full(a.n_obs, "NA")
-    return Sample(name, X.astype(np.float32), np.asarray(a.var_names),
-                  np.asarray(a.obsm["spatial_3D"], dtype=np.float32), ct)
+    s = Sample(name, X.astype(np.float32), np.asarray(a.var_names),
+               np.asarray(a.obsm["spatial_3D"], dtype=np.float32), ct)
+    if "state" in a.obs:
+        s.state = np.asarray(a.obs["state"]).astype(str)
+    if "present" in a.var:
+        s.present = np.asarray(a.var["present"]).astype(bool)
+    if "target_expr" in a.obs:
+        s.target_expr = np.asarray(a.obs["target_expr"], dtype=np.float32)
+    return s
 
 
 def transfer_states(ref: Sample, queries: list[Sample], k: int = 15, n_pc: int = 50) -> None:
