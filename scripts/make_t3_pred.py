@@ -9,6 +9,11 @@ wt_identity : stratified WT E8.75 cells with the subsample's sampling noise remo
 prototype   : vec.t3model trained on every challenge KO (Gata4 x2, Mab21l2), predicting Ctnnb1 prior-only.
               --ctnnb1-regulon adds CollecTRI's Ctnnb1 targets as the pair prior. That is effectively a
               curated Wnt target list: an "ask the organisers first" item in docs/external_data.md.
+gata4_offset: the shared "Mesp1-Cre KO vs this WT" signature. Gata4 and beta-catenin are both Mesp1-Cre KOs
+              scored against the same WT E8.75. For each Gata4 replicate, take the median within-state shift
+              per gene over the states OUTSIDE the Mesp1 lineage (--offset-states nonlineage; 'all' = every
+              state, as in analysis/t3_copy_one.py), average the replicates, and add it to every state.
+              Uses the official Gata4 validation release (allowed for P3 preparation).
 trained     : same model trained on every KO example (challenge + data/processed external pairs), with the
               --balance / --nuisance options of scripts/t3_loto.py. Needs CUDA: run it on the remote box.
 The file is validated against the board spec; nothing is uploaded.
@@ -20,7 +25,8 @@ from vec.panels import board, genes
 from vec.validate import validate
 
 p = argparse.ArgumentParser()
-p.add_argument("--model", choices=["wt_identity", "prototype", "trained"], required=True)
+p.add_argument("--model", choices=["wt_identity", "prototype", "trained", "gata4_offset"], required=True)
+p.add_argument("--offset-states", choices=["nonlineage", "all"], default="nonlineage")
 p.add_argument("--board", default="T3:bcatenin")
 p.add_argument("--target", default="Ctnnb1")
 p.add_argument("--ctnnb1-regulon", action="store_true")
@@ -53,6 +59,21 @@ if a.model == "prototype":
     pred = t3model.fit(train)(target_ctx)
     delta = a.scale * pred["yhat"]
     print(f"predicted mean pi {pred['pi'].mean():.3f}; |delta| max {abs(delta).max():.3f}")
+elif a.model == "gata4_offset":
+    import numpy as np
+    from vec import lineage
+    lin = lineage.weights(states, "Mesp1")
+    offs = []
+    for rep in ("Gata4_1", "Gata4_2"):
+        d = t3.decompose(S[rep], wt)
+        use = d["ok"] & ((lin == 0) if a.offset_states == "nonlineage" else True)
+        offs.append(np.median(d["delta"][use], 0))
+        print(f"{rep}: offset from {use.sum()} states: {[s for s, u in zip(states, use) if u]}")
+    r = np.corrcoef(offs[0], offs[1])[0, 1]
+    off = a.scale * np.mean(offs, 0)
+    print(f"replicate offsets r = {r:.2f}; genes with |offset| > 0.05: {(abs(off) > 0.05).sum()}; "
+          f"max |offset| {abs(off).max():.3f}")
+    delta = np.tile(off, (len(states), 1))
 elif a.model == "trained":
     net = t3model.load_network()
     ex = t3model.examples(net)
