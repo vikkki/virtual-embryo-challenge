@@ -10,6 +10,10 @@ challenge KOs (Gata4 x2 at E8.75, Mab21l2 at E9.5) plus every external pair in d
                    which is dropped at prediction time
   --blind test     describe each held-out target the way we can describe Ctnnb1 (off the panel: no expression
                    pattern, no co-expression, no regulon); --blind all does the same for the training targets
+  --cre            conditional challenge KOs with a known Cre (Gata4: Mesp1-Cre) act only in that lineage:
+                   activity = lineage weight x target expression; under --blind, the lineage weight alone
+                   (what we know for Ctnnb1)
+  --gate           with --cre, zero the predicted shift outside the lineage (cell-autonomous effects only)
   --seed-sets K    refit each fold K times with different seeds, to see how much of a gain is noise
   --folds A B      only run these folds (gene names or study ids)
 
@@ -26,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from vec import t3, t3model
+from vec import lineage, t3, t3model
 
 p = argparse.ArgumentParser()
 p.add_argument("--epochs", type=int, default=300)
@@ -36,6 +40,8 @@ p.add_argument("--split", choices=["gene", "study"], default="gene")
 p.add_argument("--balance", choices=["none", "study"], default="none")
 p.add_argument("--nuisance", action="store_true", help="shared learned offset per multi-gene control group")
 p.add_argument("--blind", choices=["none", "test", "all"], default="none")
+p.add_argument("--cre", action="store_true")
+p.add_argument("--gate", action="store_true")
 p.add_argument("--seed-sets", type=int, default=1)
 p.add_argument("--folds", nargs="*", default=None)
 p.add_argument("--out", default="runs/t3_loto.json")
@@ -43,13 +49,14 @@ a = p.parse_args()
 
 T = time.time()
 net = None if a.no_network else t3model.load_network()
-ex = t3model.examples(net, skip=a.skip)
+ex = t3model.examples(net, skip=a.skip, cre=a.cre)
 if a.blind != "none":
     cache = {}
     for e in ex:
-        key = (id(e["wt"]), e["target"])
+        key = (id(e["wt"]), e["target"], e["cre"])
         if key not in cache:
-            cache[key] = t3model.build_context(e["wt"], e["target"], blind=True)
+            act = t3model.cre_activity(e["wt"], None, e["cre"]) if e["cre"] else None
+            cache[key] = t3model.build_context(e["wt"], e["target"], blind=True, activity=act)
         e["ctx_blind"] = cache[key]
 print(f"{len(ex)} KO examples, {len({e['target'] for e in ex})} genes; loaded in {time.time() - T:.0f}s", flush=True)
 
@@ -80,6 +87,8 @@ for fold, test in folds:
             if k == 0:
                 out[e["name"]]["wt_identity"] = sc(t3.emit(wt, None, ctx.states, n_cells=n)[0])
             yhat = predict(ctx)["yhat"]
+            if a.gate and e["cre"]:
+                yhat = yhat * lineage.weights(ctx.states, e["cre"])[:, None]
             res = {f"model x{s}": sc(t3.emit(wt, s * yhat, ctx.states, n_cells=n)[0]) for s in SCALES}
             out[e["name"]]["runs"].append(res)
             w = out[e["name"]]["wt_identity"]

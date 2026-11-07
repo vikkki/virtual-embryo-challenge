@@ -56,9 +56,20 @@ So these teach the *shape* of a response, not its content.
 
 ## Questions for the organisers (send before using ⚠️ items)
 
-1. Is *T*/Brachyury-null data considered a phenocopy of the β-catenin KO?
-2. Are curated Wnt target gene lists / TCF-LEF ChIP-seq (WT tissue, no KO) permitted for T3?
-3. Which β-catenin allele and Cre driver is the test KO? (It decides what counts as "comparable".)
+1. Is *T*/Brachyury-null data considered a phenocopy of the β-catenin KO? *Open: the site gives no list of
+   phenocopies.*
+2. Are curated Wnt target gene lists / TCF-LEF ChIP-seq (WT tissue, no KO) permitted for T3? *Open: the rules
+   ban measured data from the held-out genotype, another allele "at a comparable stage", or a phenocopy, and
+   say nothing about literature-curated target lists. The published `gene_ko` baseline only zeroes the KO
+   gene, so it is no precedent.*
+3. ~~Which β-catenin allele and Cre driver is the test KO?~~ **Answered on the data page
+   (virtualembryo.ai/challenge/data, read 2026-11-07):** test = *Mesp1-Cre; β-catenin F/F* (two replicates);
+   validation = *Mesp1-Cre; Gata4 F/F; Gata6 F/+*. Both deletions are restricted to the Mesp1 mesoderm
+   lineage. Consequence: any published *Mesp1-Cre; Ctnnb1* (or other *Ctnnb1* allele) result at a comparable
+   stage is the held-out genotype and must not be used, including results quoted in papers.
+
+Ask in public on Slack (#virtual-embryo-challenge) or by email (virtual.embryo.moonshot@gmail.com). The rules
+say an answer given in advance is not a finding of misconduct afterwards.
 
 ## Downloaded (scripts/download_external.sh → data/external/, git-ignored)
 

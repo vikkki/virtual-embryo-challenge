@@ -22,7 +22,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-from . import t3
+from . import lineage, t3
 
 FEATURES = ["t_s", "log_f_s", "mu", "nz", "ident", "t_x_ident", "coexpr", "is_target", "reg_w", "t_x_reg",
             "gene_sd"]
@@ -103,10 +103,24 @@ def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
     return Context(target, states, X, tsum, f, gmask)
 
 
-def examples(net: pd.DataFrame | None, skip=(), min_cells: int = 20) -> list[dict]:
+def cre_activity(wt: t3.Sample, target: str | None, cre: str) -> np.ndarray:
+    """Activity of a conditional KO per WT state: Cre-lineage weight x the target's own expression in that state
+    (lineage weight alone when the target is not on the panel, as for Ctnnb1 or a blind test)."""
+    states = sorted(set(wt.state))
+    w = lineage.weights(states, cre)
+    genes = list(wt.genes)
+    if target is not None and target in genes:
+        x = wt.X[:, genes.index(target)]
+        w = w * np.array([x[wt.state == s].mean() for s in states])
+    return w
+
+
+def examples(net: pd.DataFrame | None, skip=(), min_cells: int = 20, cre: bool = False) -> list[dict]:
     """Every KO example we can train on: the challenge KOs (Gata4 x2 vs WT E8.75, Mab21l2 vs WT E9.5) plus every
     external pair in data/processed/index.json. Each dict has name, target, source (study), control (shared
-    control group), wt, ko, ctx (Context) and label (within-state delta, ok mask)."""
+    control group), cre (driver or None), wt, ko, ctx (Context) and label (within-state delta, ok mask).
+
+    cre=True: conditional challenge KOs with a known driver (vec.lineage.CRE) get activity = lineage x expression."""
     ex = []
     S = {k: t3.load(k) for k in ["WT_E8.75", "WT_E9.5", "Gata4_1", "Gata4_2", "Mab21l2"]}
     t3.transfer_states(S["WT_E8.75"], [S["Gata4_1"], S["Gata4_2"]])
@@ -121,9 +135,11 @@ def examples(net: pd.DataFrame | None, skip=(), min_cells: int = 20) -> list[dic
                    "source": meta["source"], "control": f"{meta['source']}|{meta['control']}|{meta['stage']}"})
     cache = {}
     for e in ex:
-        key = (id(e["wt"]), e["target"])
+        e["cre"] = lineage.CRE.get(e["name"]) if cre else None
+        key = (id(e["wt"]), e["target"], e["cre"])
         if key not in cache:
-            cache[key] = build_context(e["wt"], e["target"], net)
+            act = cre_activity(e["wt"], e["target"], e["cre"]) if e["cre"] else None
+            cache[key] = build_context(e["wt"], e["target"], net, activity=act)
         e["ctx"] = cache[key]
         d = t3.decompose(e["ko"], e["wt"], min_cells=min_cells)
         e["label"] = (d["delta"], d["ok"])
