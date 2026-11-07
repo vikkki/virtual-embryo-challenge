@@ -3,11 +3,14 @@
 
   python scripts/make_t3_pred.py --model wt_identity --out submissions/T3_bcatenin/wt_identity.h5ad
   python scripts/make_t3_pred.py --model prototype   --out submissions/T3_bcatenin/prototype_v0.h5ad
+  python scripts/make_t3_pred.py --model trained --balance study --nuisance --out submissions/T3_bcatenin/<name>.h5ad
 
 wt_identity : stratified WT E8.75 cells with the subsample's sampling noise removed (the board floor).
 prototype   : vec.t3model trained on every challenge KO (Gata4 x2, Mab21l2), predicting Ctnnb1 prior-only.
               --ctnnb1-regulon adds CollecTRI's Ctnnb1 targets as the pair prior. That is effectively a
               curated Wnt target list: an "ask the organisers first" item in docs/external_data.md.
+trained     : same model trained on every KO example (challenge + data/processed external pairs), with the
+              --balance / --nuisance options of scripts/t3_loto.py. Needs CUDA: run it on the remote box.
 The file is validated against the board spec; nothing is uploaded.
 """
 import argparse
@@ -17,10 +20,13 @@ from vec.panels import board, genes
 from vec.validate import validate
 
 p = argparse.ArgumentParser()
-p.add_argument("--model", choices=["wt_identity", "prototype"], required=True)
+p.add_argument("--model", choices=["wt_identity", "prototype", "trained"], required=True)
 p.add_argument("--board", default="T3:bcatenin")
 p.add_argument("--target", default="Ctnnb1")
 p.add_argument("--ctnnb1-regulon", action="store_true")
+p.add_argument("--balance", choices=["none", "study"], default="study")
+p.add_argument("--nuisance", action="store_true")
+p.add_argument("--epochs", type=int, default=300)
 p.add_argument("--scale", type=float, default=1.0)
 p.add_argument("--seed", type=int, default=0)
 p.add_argument("--out", required=True)
@@ -45,6 +51,17 @@ if a.model == "prototype":
         train.append((ctx[tgt], d["delta"], d["ok"]))
     target_ctx = t3model.build_context(wt, a.target, net if a.ctnnb1_regulon else None)
     pred = t3model.fit(train)(target_ctx)
+    delta = a.scale * pred["yhat"]
+    print(f"predicted mean pi {pred['pi'].mean():.3f}; |delta| max {abs(delta).max():.3f}")
+elif a.model == "trained":
+    net = t3model.load_network()
+    ex = t3model.examples(net)
+    wt = next(e["wt"] for e in ex if e["name"] == "Gata4_1")       # WT E8.75 with its states
+    assert list(wt.genes) == panel and sorted(set(wt.state)) == states
+    print(f"training on {len(ex)} examples / {len({e['target'] for e in ex})} genes "
+          f"(balance={a.balance}, nuisance={a.nuisance})")
+    predict = t3model.fit_examples(ex, balance=a.balance, nuisance=a.nuisance, epochs=a.epochs)
+    pred = predict(t3model.build_context(wt, a.target, net if a.ctnnb1_regulon else None))
     delta = a.scale * pred["yhat"]
     print(f"predicted mean pi {pred['pi'].mean():.3f}; |delta| max {abs(delta).max():.3f}")
 

@@ -16,6 +16,12 @@ Method notes only. Data-derived numbers stay in the git-ignored `private/` folde
    - The gene decoder sees per-(state, gene) WT features and pair priors (CollecTRI).
    - Its FiLM blocks are conditioned on the target latent.
    - Each (state, gene) gets an output (π, m, τ), and the prediction is ŷ = (1 − π)·m.
+   - Training options for mixed external data (`vec.t3model.fit`):
+     - `study_weights`: every study gets the same total weight, so a large series of KOs doesn't dominate.
+     - `nuisance_groups`: KOs of different genes measured against one shared control get a learned
+       (state, gene) offset that is subtracted from their labels while training and dropped at prediction
+       time. KOs against a shared control move together regardless of the gene, and this term soaks that up
+       so the network learns the gene-specific part. Replicates of one gene get no offset.
 4. **Emission.** `vec.t3.emit` draws WT E8.75 cells by state and keeps their 3D coordinates. It shifts each
    state's genes so the state mean moves by the predicted delta (zeros stay zero for decreases, and
    non-expressing cells are recruited for large increases). With `exact_wt`, it also removes the WT
@@ -33,7 +39,9 @@ Method notes only. Data-derived numbers stay in the git-ignored `private/` folde
 | `analysis/t3_rules.py` | target-agnostic zero-shot rules |
 | `analysis/t3_prior_check.py` | regulon-only (CollecTRI) predictions vs a random-regulon null |
 | `analysis/t3_background_check.py` | how the metrics treat a generic "highly expressed genes decrease" background |
-| `scripts/t3_loto.py` | leave-one-target-out check of the model |
+| `scripts/t3_loto.py` | held-out check of the model: `--split gene` (leave one KO gene out) or `--split study` (leave one study out, plus its genes); `--balance study`, `--nuisance` |
+| `analysis/t3_shared_control.py`, `analysis/t3_copy_one.py` | how much KOs that share one control move together |
+| `analysis/t3_reference_bump.py` | whether a KO's sample-wide shift is an artefact of its WT reference |
 | `scripts/make_t3_pred.py` | build and validate a T3 prediction file (never uploads) |
 
 ## Metric notes (from veckit 0.1.2 source)

@@ -53,17 +53,22 @@ def regulon(net: pd.DataFrame, tf: str, genes: list[str]) -> np.ndarray:
 
 
 def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
-                  activity: np.ndarray | None = None) -> Context:
+                  activity: np.ndarray | None = None, blind: bool = False) -> Context:
     """Target activity per state, in order of preference: `activity` (S,) given explicitly; the target's
     measured all-gene expression in the WT cells (`wt.target_expr`, external data); its panel transcript;
-    otherwise uniform (unknown)."""
+    otherwise uniform (unknown).
+
+    blind=True describes the target the way we can describe Ctnnb1 for T3:bcatenin: off the panel, no
+    expression pattern, no co-expression and no regulon (unless `activity` is given)."""
     genes = list(wt.genes)
     states = sorted(set(wt.state))
     st = t3.state_stats(wt, states)
     mu, nz, f = np.nan_to_num(st["mu"]), np.nan_to_num(st["nz"]), st["f"]
     S, G = mu.shape
-    on_panel = target in genes and (wt.present is None or wt.present[genes.index(target)])
-    texpr = wt.target_expr
+    on_panel = not blind and target in genes and (wt.present is None or wt.present[genes.index(target)])
+    texpr = None if blind else wt.target_expr
+    if blind:
+        net = None
     if activity is not None:
         a = np.asarray(activity, float)
     elif texpr is not None:
@@ -96,6 +101,40 @@ def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
                      float(net is not None and (net.source_genesymbol == target).any())], np.float32)
     gmask = np.ones(G, np.float32) if wt.present is None else wt.present.astype(np.float32)
     return Context(target, states, X, tsum, f, gmask)
+
+
+def examples(net: pd.DataFrame | None, skip=(), min_cells: int = 20) -> list[dict]:
+    """Every KO example we can train on: the challenge KOs (Gata4 x2 vs WT E8.75, Mab21l2 vs WT E9.5) plus every
+    external pair in data/processed/index.json. Each dict has name, target, source (study), control (shared
+    control group), wt, ko, ctx (Context) and label (within-state delta, ok mask)."""
+    ex = []
+    S = {k: t3.load(k) for k in ["WT_E8.75", "WT_E9.5", "Gata4_1", "Gata4_2", "Mab21l2"]}
+    t3.transfer_states(S["WT_E8.75"], [S["Gata4_1"], S["Gata4_2"]])
+    t3.transfer_states(S["WT_E9.5"], [S["Mab21l2"]])
+    for k, (tgt, w) in t3.KO.items():
+        ex.append({"name": k, "target": tgt, "wt": S[w], "ko": S[k], "source": "challenge",
+                   "control": f"challenge|{w}"})
+    for name, meta in t3.external_index().items():
+        if any(s in name for s in skip):
+            continue
+        ex.append({"name": name, "target": meta["target"], "wt": t3.load(meta["wt"]), "ko": t3.load(meta["ko"]),
+                   "source": meta["source"], "control": f"{meta['source']}|{meta['control']}|{meta['stage']}"})
+    cache = {}
+    for e in ex:
+        key = (id(e["wt"]), e["target"])
+        if key not in cache:
+            cache[key] = build_context(e["wt"], e["target"], net)
+        e["ctx"] = cache[key]
+        d = t3.decompose(e["ko"], e["wt"], min_cells=min_cells)
+        e["label"] = (d["delta"], d["ok"])
+    return ex
+
+
+def fit_examples(ex: list[dict], balance: str = "none", nuisance: bool = False, **kw):
+    """`fit` on example dicts from `examples`, with optional study balancing and shared-control offsets."""
+    w = study_weights([e["source"] for e in ex]) if balance == "study" else None
+    g = nuisance_groups([e["control"] for e in ex], [e["target"] for e in ex]) if nuisance else None
+    return fit([(e["ctx"], *e["label"]) for e in ex], weights=w, groups=g, **kw)
 
 
 class FiLMBlock(nn.Module):
@@ -141,8 +180,29 @@ def _norm_stats(ctxs):
     return X.mean(0), X.std(0) + 1e-6
 
 
-def fit(train: list[tuple[Context, np.ndarray, np.ndarray]], seeds=(0, 1, 2), epochs: int = 300, lr: float = 3e-3):
+def study_weights(studies: list[str]) -> np.ndarray:
+    """Per-example weights giving every study the same total weight (1 / number of its examples)."""
+    n = pd.Series(studies).value_counts()
+    return np.array([1.0 / n[s] for s in studies])
+
+
+def nuisance_groups(controls: list[str], targets: list[str], min_targets: int = 2) -> list[str | None]:
+    """Group id per example for the shared-control offset: examples that share a control AND cover at least
+    `min_targets` different KO genes. Replicates of one gene against one control get no group, otherwise the
+    offset would absorb that gene's own effect."""
+    df = pd.DataFrame({"c": controls, "t": targets})
+    many = df.groupby("c").t.nunique()
+    return [c if many[c] >= min_targets else None for c in controls]
+
+
+def fit(train: list[tuple[Context, np.ndarray, np.ndarray]], seeds=(0, 1, 2), epochs: int = 300, lr: float = 3e-3,
+        weights=None, groups=None):
     """train: list of (context, label delta (S,G), ok mask (S,)). Returns an ensemble predictor.
+
+    weights: per-example loss weights (default: equal), e.g. `study_weights` so a large series of KOs against
+    one control doesn't dominate. groups: per-example group id or None. Examples sharing a group share a learned
+    (state, gene) offset that is subtracted from their labels while training and never used for prediction. It
+    absorbs the "these KOs vs that control" signature, so the network learns the gene-specific part.
 
     Trains on CUDA. Training is meant to run on the remote GPU box (scripts/remote.sh); on a machine
     without CUDA it refuses unless VEC_ALLOW_CPU_TRAIN=1 is set.
@@ -156,16 +216,31 @@ def fit(train: list[tuple[Context, np.ndarray, np.ndarray]], seeds=(0, 1, 2), ep
                            "or set VEC_ALLOW_CPU_TRAIN=1 to train on CPU deliberately")
     xm, xs = _norm_stats([c for c, _, _ in train])
     T = lambda a, dt=torch.float32: torch.as_tensor(np.asarray(a), dtype=dt, device=dev)
+    ew = np.ones(len(train)) if weights is None else np.asarray(weights, float)
+    ew = ew / ew.sum()
+    groups = [None] * len(train) if groups is None else list(groups)
+    gstates = {}                                     # group -> union of its examples' states (row order)
+    for (c, _, _), g in zip(train, groups):
+        if g is not None:
+            gstates.setdefault(g, [])
+            gstates[g] += [s for s in c.states if s not in gstates[g]]
+    rows = [None if g is None else torch.as_tensor([gstates[g].index(s) for s in c.states], device=dev)
+            for (c, _, _), g in zip(train, groups)]
+    data = [(T((c.X - xm) / xs), T(c.tsum), T(np.nan_to_num(y)),
+             T((c.f * ok)[:, None] * c.gmask[None, :])) for c, y, ok in train]
+    G = train[0][0].X.shape[1]
     models = []
     for seed in seeds:
         torch.manual_seed(seed)
         model = SpikeSlab().to(dev)
-        opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
-        data = [(T((c.X - xm) / xs), T(c.tsum), T(np.nan_to_num(y)),
-                 T((c.f * ok)[:, None] * c.gmask[None, :])) for c, y, ok in train]
+        off = {g: torch.zeros(len(st), G, device=dev, requires_grad=True) for g, st in gstates.items()}
+        opt = torch.optim.AdamW([{"params": model.parameters(), "weight_decay": 1e-3},
+                                 {"params": list(off.values()), "weight_decay": 0.0}], lr=lr)
         for ep in range(epochs):
             opt.zero_grad()
-            loss = sum(_loss(model, x, ts, y, w) for x, ts, y, w in data) / len(data)
+            loss = 0.0
+            for (x, ts, y, w), e, g, r in zip(data, ew, groups, rows):
+                loss = loss + e * _loss(model, x, ts, y if g is None else y - off[g][r], w)
             loss.backward()
             opt.step()
         models.append(model.eval())
