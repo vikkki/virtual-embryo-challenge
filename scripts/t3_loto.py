@@ -21,6 +21,7 @@ p = argparse.ArgumentParser()
 p.add_argument("--epochs", type=int, default=300)
 p.add_argument("--no-network", action="store_true", help="drop the CollecTRI pair prior")
 p.add_argument("--skip", nargs="*", default=[], help="drop external pairs whose name contains any of these")
+p.add_argument("--out", default="runs/t3_loto.json")
 a = p.parse_args()
 
 T = time.time()
@@ -66,6 +67,6 @@ for tgt in sorted({e["target"] for e in ex}):
 gain = {k: v["model x1.0"]["approx_total"] - v["wt_identity"]["approx_total"] for k, v in out.items()}
 print("\nmodel x1 minus floor, per example:", {k: round(g, 1) for k, g in gain.items()})
 print(f"mean {np.mean(list(gain.values())):+.1f}; beats floor on {sum(g > 0 for g in gain.values())}/{len(gain)}")
-Path("runs").mkdir(exist_ok=True)
-Path("runs/t3_loto.json").write_text(json.dumps(out, indent=1))
+Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+Path(a.out).write_text(json.dumps(out, indent=1))
 print(f"done in {time.time() - T:.0f}s")
