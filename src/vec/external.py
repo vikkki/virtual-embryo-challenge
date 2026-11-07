@@ -58,9 +58,13 @@ def panel_col(symbol: str) -> int:
 
 
 def ensembl_to_symbol() -> dict[str, str]:
-    """Ensembl -> symbol from the Pijuan-Sala genes.tsv (same annotation family as the other datasets)."""
-    d = extract(EXT / "tal1_chimera_pijuansala2019/chimera_tal1_data.tar.gz", WORK / "tal1")
-    g = pd.read_csv(d / "chimera-tal1/genes.tsv", sep="\t", header=None)
+    """Ensembl -> symbol from a 10x features file (Grosswendt, plain .tsv.gz) or else the Pijuan-Sala genes.tsv."""
+    f = EXT / "ko_grosswendt2020/GSE137337_DNMT1_E8.5_1ab.features.tsv.gz"
+    if f.exists():
+        g = pd.read_csv(f, sep="\t", header=None)
+    else:
+        d = extract(EXT / "tal1_chimera_pijuansala2019/chimera_tal1_data.tar.gz", WORK / "tal1")
+        g = pd.read_csv(d / "chimera-tal1/genes.tsv", sep="\t", header=None)
     return dict(zip(g[0], g[1]))
 
 
