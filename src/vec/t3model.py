@@ -53,13 +53,14 @@ def regulon(net: pd.DataFrame, tf: str, genes: list[str]) -> np.ndarray:
 
 
 def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
-                  activity: np.ndarray | None = None, blind: bool = False) -> Context:
+                  activity: np.ndarray | None = None, blind: bool = False, keep_regulon: bool = False) -> Context:
     """Target activity per state, in order of preference: `activity` (S,) given explicitly; the target's
     measured all-gene expression in the WT cells (`wt.target_expr`, external data); its panel transcript;
     otherwise uniform (unknown).
 
     blind=True describes the target the way we can describe Ctnnb1 for T3:bcatenin: off the panel, no
-    expression pattern, no co-expression and no regulon (unless `activity` is given)."""
+    expression pattern, no co-expression and no regulon (unless `activity` is given). keep_regulon=True keeps
+    the regulon (what we would have for Ctnnb1 if curated Wnt target lists are allowed)."""
     genes = list(wt.genes)
     states = sorted(set(wt.state))
     st = t3.state_stats(wt, states)
@@ -67,7 +68,7 @@ def build_context(wt: t3.Sample, target: str, net: pd.DataFrame | None = None,
     S, G = mu.shape
     on_panel = not blind and target in genes and (wt.present is None or wt.present[genes.index(target)])
     texpr = None if blind else wt.target_expr
-    if blind:
+    if blind and not keep_regulon:
         net = None
     if activity is not None:
         a = np.asarray(activity, float)

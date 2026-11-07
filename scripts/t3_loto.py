@@ -14,6 +14,9 @@ challenge KOs (Gata4 x2 at E8.75, Mab21l2 at E9.5) plus every external pair in d
                    activity = lineage weight x target expression; under --blind, the lineage weight alone
                    (what we know for Ctnnb1)
   --gate           with --cre, zero the predicted shift outside the lineage (cell-autonomous effects only)
+  --keep-regulon   under --blind, keep the target's CollecTRI regulon (only expression info is hidden)
+  --shuffle-regulon SEED  null control: move the held-out target's regulon onto random panel genes (same size
+                   and signs) in the test context
   --seed-sets K    refit each fold K times with different seeds, to see how much of a gain is noise
   --folds A B      only run these folds (gene names or study ids)
 
@@ -24,6 +27,7 @@ Each prediction is emitted from that context's WT cells and scored with veckit's
 Training needs CUDA (run on the remote box).
 """
 import argparse
+import dataclasses
 import json
 import time
 from pathlib import Path
@@ -42,6 +46,8 @@ p.add_argument("--nuisance", action="store_true", help="shared learned offset pe
 p.add_argument("--blind", choices=["none", "test", "all"], default="none")
 p.add_argument("--cre", action="store_true")
 p.add_argument("--gate", action="store_true")
+p.add_argument("--keep-regulon", action="store_true")
+p.add_argument("--shuffle-regulon", type=int, default=None)
 p.add_argument("--seed-sets", type=int, default=1)
 p.add_argument("--folds", nargs="*", default=None)
 p.add_argument("--out", default="runs/t3_loto.json")
@@ -56,7 +62,8 @@ if a.blind != "none":
         key = (id(e["wt"]), e["target"], e["cre"])
         if key not in cache:
             act = t3model.cre_activity(e["wt"], None, e["cre"]) if e["cre"] else None
-            cache[key] = t3model.build_context(e["wt"], e["target"], blind=True, activity=act)
+            cache[key] = t3model.build_context(e["wt"], e["target"], net, blind=True, activity=act,
+                                               keep_regulon=a.keep_regulon)
         e["ctx_blind"] = cache[key]
 print(f"{len(ex)} KO examples, {len({e['target'] for e in ex})} genes; loaded in {time.time() - T:.0f}s", flush=True)
 
@@ -67,6 +74,19 @@ else:
 if a.folds:
     folds = [f for f in folds if f[0] in a.folds]
 SCALES = (0.5, 1.0)
+
+
+def shuffled_regulon(ctx, seed):
+    """Same context with the regulon features (reg_w, activity x reg_w) moved to random measured genes."""
+    idx = [t3model.FEATURES.index(f) for f in ("reg_w", "t_x_reg")]
+    genes = np.flatnonzero(ctx.gmask > 0)
+    perm = np.arange(ctx.X.shape[1])
+    perm[genes] = np.random.default_rng(seed).permutation(genes)
+    X = ctx.X.copy()
+    X[:, :, idx] = ctx.X[:, perm][:, :, idx]
+    return dataclasses.replace(ctx, X=X)
+
+
 out = {}
 for fold, test in folds:
     held = {e["target"] for e in test}
@@ -82,6 +102,8 @@ for fold, test in folds:
         for e in test:
             wt = e["wt"]
             ctx = e["ctx_blind"] if a.blind != "none" else e["ctx"]
+            if a.shuffle_regulon is not None:
+                ctx = shuffled_regulon(ctx, a.shuffle_regulon)
             n = min(7449, wt.X.shape[0])
             sc = t3.Scorer(e["ko"].X, wt.X)
             if k == 0:
