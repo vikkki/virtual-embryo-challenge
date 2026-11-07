@@ -14,6 +14,11 @@ gata4_offset: the shared "Mesp1-Cre KO vs this WT" signature. Gata4 and beta-cat
               per gene over the states OUTSIDE the Mesp1 lineage (--offset-states nonlineage; 'all' = every
               state, as in analysis/t3_copy_one.py), average the replicates, and add it to every state.
               Uses the official Gata4 validation release (allowed for P3 preparation).
+knowledge   : gata4_offset (--base) plus a knowledge layer: CollecTRI's Ctnnb1 regulon (a curated Wnt target list:
+              ask the organisers before uploading) acting only in the Mesp1 lineage. In state s, activated
+              targets drop and repressed targets rise by kappa x lineage weight x the target's own WT mean:
+              delta[s,g] = -kappa * sign_g * L_s * mu[s,g]. Most canonical Wnt readouts (Axin2, Sp5, Lef1,
+              Nkd1, Notum) are not on the panel, hence the curated regulon.
 trained     : same model trained on every KO example (challenge + data/processed external pairs), with the
               --balance / --nuisance options of scripts/t3_loto.py. Needs CUDA: run it on the remote box.
 The file is validated against the board spec; nothing is uploaded.
@@ -25,7 +30,9 @@ from vec.panels import board, genes
 from vec.validate import validate
 
 p = argparse.ArgumentParser()
-p.add_argument("--model", choices=["wt_identity", "prototype", "trained", "gata4_offset"], required=True)
+p.add_argument("--model", choices=["wt_identity", "prototype", "trained", "gata4_offset", "knowledge"], required=True)
+p.add_argument("--base", choices=["gata4_offset", "none"], default="gata4_offset")
+p.add_argument("--kappa", type=float, default=0.5)
 p.add_argument("--offset-states", choices=["nonlineage", "all"], default="nonlineage")
 p.add_argument("--board", default="T3:bcatenin")
 p.add_argument("--target", default="Ctnnb1")
@@ -59,7 +66,7 @@ if a.model == "prototype":
     pred = t3model.fit(train)(target_ctx)
     delta = a.scale * pred["yhat"]
     print(f"predicted mean pi {pred['pi'].mean():.3f}; |delta| max {abs(delta).max():.3f}")
-elif a.model == "gata4_offset":
+elif a.model in ("gata4_offset", "knowledge"):
     import numpy as np
     from vec import lineage
     lin = lineage.weights(states, "Mesp1")
@@ -74,6 +81,17 @@ elif a.model == "gata4_offset":
     print(f"replicate offsets r = {r:.2f}; genes with |offset| > 0.05: {(abs(off) > 0.05).sum()}; "
           f"max |offset| {abs(off).max():.3f}")
     delta = np.tile(off, (len(states), 1))
+    if a.model == "knowledge":
+        if a.base == "none":
+            delta[:] = 0.0
+        w = t3model.regulon(t3model.load_network(), a.target, panel)
+        mu = t3.state_stats(wt, states)["mu"]
+        layer = -a.kappa * lin[:, None] * w[None, :] * np.nan_to_num(mu)
+        delta = delta + layer
+        hit = np.flatnonzero(w)
+        print(f"knowledge layer: {len(hit)} {a.target} targets ({(w > 0).sum()} activated -> down, "
+              f"{(w < 0).sum()} repressed -> up) in {int((lin > 0).sum())} lineage states; "
+              f"pseudobulk change of the layer: {np.round(np.sort((wt_f := t3.state_stats(wt, states)['f']) @ layer)[:5], 3)} ...")
 elif a.model == "trained":
     net = t3model.load_network()
     ex = t3model.examples(net)
