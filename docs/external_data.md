@@ -52,7 +52,7 @@ So these teach the *shape* of a response, not its content.
 |---|---|---|
 | GenePT / scGPT gene embeddings | gene-similarity features for the target gene and the readout genes | ✅ check training corpora |
 | CollecTRI / DoRothEA / OmniPath / STRING | target → gene regulatory priors | ✅ |
-| Literature Wnt/TCF target gene sets, TCF/LEF ChIP in WT tissue | expected response genes for β-catenin | ⚠️ not KO data, but closest to the line; ask organisers |
+| Literature Wnt/TCF target gene sets, TCF/LEF ChIP in WT tissue | expected response genes for β-catenin | ✅ team decision 2026-11-07: public knowledge, not measured data from the held-out genotype. Used as `docs/wnt_targets_curated.csv` (Nusse-lab list at wnt.stanford.edu/target_genes + CollecTRI Ctnnb1 regulon); entries whose evidence is β-catenin perturbation in early heart/mesoderm are excluded (Isl1, Lin 2007) |
 
 ## Questions for the organisers (send before using ⚠️ items)
 

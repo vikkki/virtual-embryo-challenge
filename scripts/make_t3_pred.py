@@ -18,7 +18,9 @@ knowledge   : gata4_offset (--base) plus a knowledge layer: CollecTRI's Ctnnb1 r
               ask the organisers before uploading) acting only in the Mesp1 lineage. In state s, activated
               targets drop and repressed targets rise by kappa x lineage weight x the target's own WT mean:
               delta[s,g] = -kappa * sign_g * L_s * mu[s,g]. Most canonical Wnt readouts (Axin2, Sp5, Lef1,
-              Nkd1, Notum) are not on the panel, hence the curated regulon.
+              Nkd1, Notum) are not on the panel, hence the curated regulon. --targets curated uses
+              docs/wnt_targets_curated.csv instead: the Nusse-lab Wnt target list (wnt.stanford.edu) merged with
+              CollecTRI, weight 1 where both agree, 0.5 for one source, conflicts and held-out-derived entries dropped.
 trained     : same model trained on every KO example (challenge + data/processed external pairs), with the
               --balance / --nuisance options of scripts/t3_loto.py. Needs CUDA: run it on the remote box.
 The file is validated against the board spec; nothing is uploaded.
@@ -33,6 +35,8 @@ p = argparse.ArgumentParser()
 p.add_argument("--model", choices=["wt_identity", "prototype", "trained", "gata4_offset", "knowledge"], required=True)
 p.add_argument("--base", choices=["gata4_offset", "none"], default="gata4_offset")
 p.add_argument("--kappa", type=float, default=0.5)
+p.add_argument("--targets", choices=["collectri", "curated"], default="collectri",
+               help="curated = docs/wnt_targets_curated.csv (Nusse-lab Wnt target list + CollecTRI, sourced)")
 p.add_argument("--offset-states", choices=["nonlineage", "all"], default="nonlineage")
 p.add_argument("--board", default="T3:bcatenin")
 p.add_argument("--target", default="Ctnnb1")
@@ -84,7 +88,12 @@ elif a.model in ("gata4_offset", "knowledge"):
     if a.model == "knowledge":
         if a.base == "none":
             delta[:] = 0.0
-        w = t3model.regulon(t3model.load_network(), a.target, panel)
+        if a.targets == "curated":
+            import pandas as pd
+            cur = pd.read_csv(t3.ROOT / "docs/wnt_targets_curated.csv").set_index("gene")["weight"]
+            w = np.array([float(cur.get(g, 0.0)) for g in panel])
+        else:
+            w = t3model.regulon(t3model.load_network(), a.target, panel)
         mu = t3.state_stats(wt, states)["mu"]
         layer = -a.kappa * lin[:, None] * w[None, :] * np.nan_to_num(mu)
         delta = delta + layer
